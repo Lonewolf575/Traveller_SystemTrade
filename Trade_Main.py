@@ -149,10 +149,10 @@ global hexSize; hexSize = 20
 global major_radius; major_radius = hexSize / math.cos(math.radians(30))
 global hexOffsetX; hexOffsetX = major_radius
 global hexOffsetY; hexOffsetY = hexSize
-global hexGridX; hexGridX = 16
-global hexGridY; hexGridY = 20
+global hexGridX; hexGridX = 12
+global hexGridY; hexGridY = 8
 
-global numberOfSystems; numberOfSystems = 75
+global numberOfSystems; numberOfSystems = 50
 
 #######################
 ##-Global roll chart-##
@@ -187,10 +187,9 @@ def genHexes():
     vert_spacing = hex_height
 
 
-
-    for row in range(hexGridX):
-        for col in range(hexGridY):
-            hex = Hex(row, col)
+    for col in range(hexGridX):
+        for row in range(hexGridY):
+            hex = Hex(col, row)
             x = (col * horiz_spacing) + hexOffsetX
             y = (row * vert_spacing) + hexOffsetY
             if col % 2 == 1:
@@ -313,28 +312,44 @@ def convertToGrid(listHexes):
 def minDistance(point1,point2):
     return math.sqrt(((point2[0]-point1[0])* (point2[0]-point1[0])) + ((point2[1]-point1[1])* (point2[1]-point1[1])))
 
-def getNeighbors(hexGrid,current):
-    neighbors = []
-    possibleNeighbors = []
-    if current[0] % 2 == 0: #Even
-        possibleNeighbors = [[current[0],current[1] - 1],[current[0],current[1] + 1],[current[0]+1,current[0] - 1],[current[0]-1,current[0] - 1],[current[0]+1,current[0]],[current[0]-1,current[0]]]
-    if current[0] % 2 == 1: #Odd
-        possibleNeighbors = [[current[0],current[1] - 1],[current[0],current[1] + 1],[current[0]+1,current[0] + 1],[current[0]-1,current[0] + 1],[current[0]+1,current[0]],[current[0]-1,current[0]]]
-    for possibleNeighbor in possibleNeighbors:
-        print(possibleNeighbor[0])
-        if (possibleNeighbor[0] >= 0) and (possibleNeighbor[0] < hexGridX):
-            if (possibleNeighbor[1] >= 0) and (possibleNeighbor[1] < hexGridY):
-                print(hexGrid[possibleNeighbor[0]][possibleNeighbor[1]])
-                if hexGrid[possibleNeighbor[0]][possibleNeighbor[1]] == True:
-                    neighbors.append(possibleNeighbor)
+def getNeighbors(hexGrid,start, jumpRange):
+    neighbors = [start]
+    currentRing = [start]
+
+    for i in range(jumpRange):
+        for current in currentRing:
+            possibleNeighbors = []
+            nextRing = []
+            if current[0] % 2 == 0: #Even
+                possibleNeighbors = [[current[0],current[1] - 1],[current[0],current[1] + 1],[current[0]+1,current[1] - 1],[current[0]-1,current[1] - 1],[current[0]+1,current[1]],[current[0]-1,current[1]]]
+            if current[0] % 2 == 1: #Odd
+                possibleNeighbors = [[current[0],current[1] - 1],[current[0],current[1] + 1],[current[0]+1,current[1] + 1],[current[0]-1,current[1] + 1],[current[0]+1,current[1]],[current[0]-1,current[1]]]
+            for possibleNeighbor in possibleNeighbors:
+                if (possibleNeighbor[0] >= 0) and (possibleNeighbor[0] < hexGridX):
+                    if (possibleNeighbor[1] >= 0) and (possibleNeighbor[1] < hexGridY):
+                        if ((possibleNeighbor not in neighbors) and (possibleNeighbor not in nextRing)):
+                            nextRing.append(possibleNeighbor)
+                        if hexGrid[possibleNeighbor[0]][possibleNeighbor[1]] == True:
+                            if ((possibleNeighbor not in neighbors)):
+                                neighbors.insert(0,possibleNeighbor)
+        currentRing = nextRing.copy()
+    neighbors.remove(start)
     return neighbors
 
+def reconstruct_path(cameFrom, current):
+    total_path = [current]
+    currentString = f"{current[0]}_{current[1]}"
+    while currentString in cameFrom.keys():
+        current = cameFrom[currentString]
+        currentString = f"{current[0]}_{current[1]}"
+        total_path.insert(0,current)
+    return total_path
 
 
-def navigatePath(start, end, hexGrid):
+def navigatePath(start, end, hexGrid, jumpRange):
     #https://en.wikipedia.org/wiki/A*_search_algorithm Pseudocode
     openSet = [start]
-    cameFrom = []
+    cameFrom = {}
     gScore = {}
     gScore[f"{start[0]}_{start[1]}"] = 0
     fScore = {}
@@ -348,19 +363,21 @@ def navigatePath(start, end, hexGrid):
         current = lowestOpenSet
 
         if current == end:
-            return cameFrom
             return reconstruct_path(cameFrom, current)
+        print(f"Checking Node: {current}")
         openSet.remove(current)
-        neighbors = getNeighbors(hexGrid,current) #note, will have to account for
+
+        neighbors = getNeighbors(hexGrid,current,jumpRange) #note, will have to account for
         for neighbor in neighbors:
-            tentative_gScore = gScore[current] + 1 #note, will have to change to weight in 'jumps'
+            tentative_gScore = gScore[f"{current[0]}_{current[1]}"] + minDistance(neighbor,current) #note, will have to change to weight in 'jumps'
             neighborString = f"{neighbor[0]}_{neighbor[1]}"
-            if (neighborString not in gScore.keys):
+            if (neighborString not in gScore.keys()):
                 gScore[neighborString] = 99999999
             if (tentative_gScore < gScore[neighborString]):
-                cameFrom[neighborString].append(current)
+                cameFrom[neighborString] = current
                 gScore[neighborString] = tentative_gScore
                 fScore[neighborString] = tentative_gScore + minDistance(neighbor,end)
+                print(f"Neighbor {neighbor} F-score: {tentative_gScore + minDistance(neighbor,end)}")
                 if neighbor not in openSet:
                     openSet.append(neighbor)
 
@@ -379,6 +396,7 @@ def main():
 
     player_pos = pygame.Vector2(screen.get_width() / 2, screen.get_height() / 2)
     listHexes = genHexes()
+
     listSystems = genSystems(listHexes)
     listHexGrid = convertToGrid(listHexes)
     genShips(listSystems)
@@ -386,14 +404,22 @@ def main():
     listLines = []
     startPosX = listSystems[0].posX
     startPosY = listSystems[0].posY
+    listSystems[0].color = "red"
     endPosX = listSystems[1].posX
     endPosY = listSystems[1].posY
+    listSystems[1].color = "blue"
 
     line = Line(startPosX, startPosY, endPosX, endPosY, "yellow")
     listLines.append(line)
     text = gameFont.render("Test 1", False, "white")
 
-    print(navigatePath([listSystems[0].hexNumX,listSystems[0].hexNumY], [listSystems[1].hexNumX,listSystems[1].hexNumY], listHexGrid))
+    print(f"Startpos {listSystems[0].hexNumX}:{listSystems[0].hexNumY}   Endpos {listSystems[1].hexNumX}:{listSystems[1].hexNumY}")
+    print("Jump 1")
+    print(navigatePath([listSystems[0].hexNumX,listSystems[0].hexNumY], [listSystems[1].hexNumX,listSystems[1].hexNumY], listHexGrid,1))
+    print("Jump 2")
+    print(navigatePath([listSystems[0].hexNumX,listSystems[0].hexNumY], [listSystems[1].hexNumX,listSystems[1].hexNumY], listHexGrid,2))
+    print("Jump 3")
+    print(navigatePath([listSystems[0].hexNumX,listSystems[0].hexNumY], [listSystems[1].hexNumX,listSystems[1].hexNumY], listHexGrid,3))
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
