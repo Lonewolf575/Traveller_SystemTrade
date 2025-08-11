@@ -1,6 +1,8 @@
 import pygame
 import random
 import math
+from datetime import datetime, timedelta
+
 from enum import Enum
 
 ###########################
@@ -34,7 +36,7 @@ class TradeTypes(Enum):
 
 
 class Cargo:
-    Tonnage = 0
+    tonnage = 0
 
 class CargoMail(Cargo):
     origin = ""
@@ -43,8 +45,13 @@ class CargoMail(Cargo):
     stringList = []
 
 class CargoGeneric(Cargo):
+    cargoName = ""
     origin = ""
+    originHexX = 0
+    originHexY = 0
     destination = ""
+    destinationHexX = 0
+    destinationHexY = 0
     worth = 0
 
 class UIObject:
@@ -107,6 +114,7 @@ class System(UIObject):
     hexNumX = 0
     hexNumY= 0
     shipsInSystem = []
+    cargoForPickup = []
     def __init__(self, posX, posY, size = 10, name = "system", color = "grey", shape = Shape.CIRCLE):
         self.posX = posX
         self.posY = posY
@@ -142,6 +150,7 @@ global shipGenCountdown; shipGenCountdown = waitBetweenShipGen
 global numShipsDuringGen; numShipsDuringGen = 5
 global chanceToSpawnShip; chanceToSpawnShip = 3
 global gameTime; gameTime = 0
+global currentYear; currentYear = 1000
 global gameDay; gameDay = 4 #Every X seconds is 1 day
 global systemTravelTime; systemTravelTime = 7 #It takes 7 days to get from one system to another, regardless of distance.
 
@@ -158,12 +167,14 @@ global numberOfSystems; numberOfSystems = 50
 ##-Global roll chart-##
 #######################
 global shipJumpRangeChart; shipJumpRangeChart = [2,2,2,2,2,2,2,3,3,3,3,3,3,4,4,4,5,5,6]
+global parsecShipmentRate; parsecShipmentRate = {1:1000, 2:1600, 3:2600, 4:4400, 5:8500, 6:32000}
 
 global maxShips; maxShips = 30
 global dt; dt = 0.0
 pygame.init()
 pygame.font.init()
 global gameFont; gameFont = pygame.font.SysFont("Aptos", 20)
+global gameFontSideUI; gameFontSideUI = pygame.font.SysFont("Aptos", 30)
 global screen; screen = pygame.display.set_mode((1500, 1000))
 global clock; clock = pygame.time.Clock()
 global tradeChart; tradeChart = {
@@ -173,6 +184,8 @@ global tradeChart; tradeChart = {
 ###########################
 ###-FUNCTIONS-###
 ###########################
+def roll2d6():
+    return random.randint(1,6) + random.randint(1,6)
 
 def genHexes():
     hexes = []
@@ -282,6 +295,13 @@ def moveShips(listShips):
     for ship in shipsToRemove:
         listShips.remove(ship)
 
+def get_date_from_day_number(year, day_number):
+    # Start from January 1st of the given year
+    start_date = datetime(year, 1, 1)
+    # Add the number of days (subtract 1 because Jan 1 is day 1)
+    target_date = start_date + timedelta(days=day_number - 1)
+    return target_date.strftime("%B %d") + f", {year}"  # Returns format like "August 08"
+
 def drawUI(UIElements):
     for UIElement in UIElements:
         pos = pygame.Vector2(UIElement.posX,UIElement.posY)
@@ -301,6 +321,12 @@ def drawUI(UIElements):
             startPos = pygame.Vector2(UIElement.startPosX, UIElement.startPosY)
             endPos = pygame.Vector2(UIElement.posX,UIElement.posY)
             pygame.draw.line(screen, "blue", startPos, endPos)
+
+def drawSideUI(time):
+    xOffset = (hexGridX * (3/4 * (2 * major_radius))) + hexOffsetX
+    date = get_date_from_day_number(currentYear, (time // gameDay) + 1)
+    text = gameFontSideUI.render(f"Date: {date}", False, "white")
+    screen.blit(text,(xOffset,0))
 
 def convertToGrid(listHexes):
     hexGrid = [[False for _ in range(hexGridY)] for _ in range(hexGridX)]
@@ -364,7 +390,6 @@ def navigatePath(start, end, hexGrid, jumpRange):
 
         if current == end:
             return reconstruct_path(cameFrom, current)
-        print(f"Checking Node: {current}")
         openSet.remove(current)
 
         neighbors = getNeighbors(hexGrid,current,jumpRange) #note, will have to account for
@@ -377,11 +402,37 @@ def navigatePath(start, end, hexGrid, jumpRange):
                 cameFrom[neighborString] = current
                 gScore[neighborString] = tentative_gScore
                 fScore[neighborString] = tentative_gScore + minDistance(neighbor,end)
-                print(f"Neighbor {neighbor} F-score: {tentative_gScore + minDistance(neighbor,end)}")
                 if neighbor not in openSet:
                     openSet.append(neighbor)
 
     return False
+def getTargetSystemsInRange(system,listHexGrid,ringSize):
+    finalSystem = []
+    while ((len(finalSystem) == 0) and (ringSize > 1)):
+        systemsInOuterRing = getNeighbors(listHexGrid,[system.hexNumX,system.hexNumY],ringSize)
+        systemsInInnerRing = getNeighbors(listHexGrid,[system.hexNumX,system.hexNumY],ringSize-1)
+        finalSystem = [item for item in systemsInOuterRing if item not in systemsInInnerRing]
+        if (len(finalSystem) == 0):
+            ringSize = ringSize - 1
+    return finalSystem, ringSize
+
+
+def generateCargo(gameTime,system,listHexGrid,cargoType,cargoSize,cargoSizeMod):
+    destination,range = getTargetSystemsInRange(system,listHexGrid,random.randint(1,6))
+    if destination == []:
+        return None
+    newCargo = CargoGeneric()
+    newCargo.origin = system.name
+    newCargo.originHexX = system.hexNumX
+    newCargo.originHexY = system.hexNumY
+    newCargo.destination = 
+    return newCargo
+
+def performNewDay(gameTime,listSystems,listHexGrid):
+    for system in listSystems:
+        system.cargoForPickup.append(generateCargo(gameTime,system,listHexGrid,"Major Cargo", random.randint(1,6) * 10, -4))
+        system.cargoForPickup.append(generateCargo(gameTime,system,listHexGrid,"Minor Cargo", random.randint(1,6) * 5, 0))
+        system.cargoForPickup.append(generateCargo(gameTime,system,listHexGrid,"Incidental Cargo", random.randint(1,6), 2))
 
 
 ###########################
@@ -389,8 +440,10 @@ def navigatePath(start, end, hexGrid, jumpRange):
 ###########################
 
 def main():
+    random.seed(2)
     global dt
     global gameTime
+    gameDay = 1
     # pygame setup
     running = True
 
@@ -401,25 +454,10 @@ def main():
     listHexGrid = convertToGrid(listHexes)
     genShips(listSystems)
     listShipsFlying = []
-    listLines = []
-    startPosX = listSystems[0].posX
-    startPosY = listSystems[0].posY
-    listSystems[0].color = "red"
-    endPosX = listSystems[1].posX
-    endPosY = listSystems[1].posY
-    listSystems[1].color = "blue"
 
-    line = Line(startPosX, startPosY, endPosX, endPosY, "yellow")
-    listLines.append(line)
     text = gameFont.render("Test 1", False, "white")
 
-    print(f"Startpos {listSystems[0].hexNumX}:{listSystems[0].hexNumY}   Endpos {listSystems[1].hexNumX}:{listSystems[1].hexNumY}")
-    print("Jump 1")
-    print(navigatePath([listSystems[0].hexNumX,listSystems[0].hexNumY], [listSystems[1].hexNumX,listSystems[1].hexNumY], listHexGrid,1))
-    print("Jump 2")
-    print(navigatePath([listSystems[0].hexNumX,listSystems[0].hexNumY], [listSystems[1].hexNumX,listSystems[1].hexNumY], listHexGrid,2))
-    print("Jump 3")
-    print(navigatePath([listSystems[0].hexNumX,listSystems[0].hexNumY], [listSystems[1].hexNumX,listSystems[1].hexNumY], listHexGrid,3))
+    # print(navigatePath([listSystems[0].hexNumX,listSystems[0].hexNumY], [listSystems[1].hexNumX,listSystems[1].hexNumY], listHexGrid,3))
     while running:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -441,12 +479,17 @@ def main():
         #    player_pos.x += 300 * dt
 
         #listShipsFlying =
+        if (gameDay != (gameTime // gameDay) + 1):
+            gameDay = (gameTime // gameDay) + 1
+            performNewDay(gameTime, listSystems, listHexGrid)
 
         moveShips(listShipsFlying)
         drawUI(listHexes)
         drawUI(listSystems)
         drawUI(listShipsFlying)
-        drawUI(listLines)
+        drawSideUI(gameTime)
+
+        # drawUI(listLines)
         # flip() the display to put your work on screen
         pygame.display.flip()
         dt = clock.tick(60) / 1000
