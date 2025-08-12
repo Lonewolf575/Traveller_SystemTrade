@@ -322,17 +322,27 @@ def drawUI(UIElements):
             endPos = pygame.Vector2(UIElement.posX,UIElement.posY)
             pygame.draw.line(screen, "blue", startPos, endPos)
 
-def drawSideUI(time):
+def drawSideUI(time,listSystems):
     xOffset = (hexGridX * (3/4 * (2 * major_radius))) + hexOffsetX
     date = get_date_from_day_number(currentYear, (time // gameDay) + 1)
-    text = gameFontSideUI.render(f"Date: {date}", False, "white")
-    screen.blit(text,(xOffset,0))
+    dateText = gameFontSideUI.render(f"Date: {date}", False, "white")
+    screen.blit(dateText,(xOffset,0))
+    system = listSystems[0]
+    textToPrint = f"System:{system.name}, Position:[{system.hexNumX},{system.hexNumY}]"
+    textToPrint = textToPrint + f"/r/nCargoCount:{len(system.cargoForPickup)}"
+    #for cargo in system.cargoForPickup:
+    #    textToPrint = textToPrint + f"\r\nCargoName:{cargo.cargoName}, Worth:{cargo.worth}, Tonnage:{cargo.tonnage}"
+
+    systemText = gameFontSideUI.render(textToPrint, False, "white")
+    screen.blit(systemText,(xOffset,20))
 
 def convertToGrid(listHexes):
     hexGrid = [[False for _ in range(hexGridY)] for _ in range(hexGridX)]
     for hex in listHexes:
         if hex.systemAssigned == True:
-            hexGrid[hex.hexNumX][hex.hexNumY] = True
+            hexGrid[hex.hexNumX][hex.hexNumY] = hex.system
+        else:
+            hexGrid[hex.hexNumX][hex.hexNumY] = None
     return hexGrid
 
 def minDistance(point1,point2):
@@ -355,7 +365,7 @@ def getNeighbors(hexGrid,start, jumpRange):
                     if (possibleNeighbor[1] >= 0) and (possibleNeighbor[1] < hexGridY):
                         if ((possibleNeighbor not in neighbors) and (possibleNeighbor not in nextRing)):
                             nextRing.append(possibleNeighbor)
-                        if hexGrid[possibleNeighbor[0]][possibleNeighbor[1]] == True:
+                        if hexGrid[possibleNeighbor[0]][possibleNeighbor[1]] != None:
                             if ((possibleNeighbor not in neighbors)):
                                 neighbors.insert(0,possibleNeighbor)
         currentRing = nextRing.copy()
@@ -407,32 +417,48 @@ def navigatePath(start, end, hexGrid, jumpRange):
 
     return False
 def getTargetSystemsInRange(system,listHexGrid,ringSize):
-    finalSystem = []
-    while ((len(finalSystem) == 0) and (ringSize > 1)):
+    finalSystems = []
+    while ((len(finalSystems) == 0) and (ringSize > 1)):
         systemsInOuterRing = getNeighbors(listHexGrid,[system.hexNumX,system.hexNumY],ringSize)
         systemsInInnerRing = getNeighbors(listHexGrid,[system.hexNumX,system.hexNumY],ringSize-1)
-        finalSystem = [item for item in systemsInOuterRing if item not in systemsInInnerRing]
-        if (len(finalSystem) == 0):
+        finalSystems = [item for item in systemsInOuterRing if item not in systemsInInnerRing]
+        if (len(finalSystems) == 0):
             ringSize = ringSize - 1
+
+    if (len(finalSystems)  == 0):
+        return None,0
+    finalSystem = finalSystems[random.randrange(0,len(finalSystems))]
     return finalSystem, ringSize
 
 
 def generateCargo(gameTime,system,listHexGrid,cargoType,cargoSize,cargoSizeMod):
     destination,range = getTargetSystemsInRange(system,listHexGrid,random.randint(1,6))
-    if destination == []:
+    if destination == None:
         return None
+
     newCargo = CargoGeneric()
+    newCargo.cargoName = cargoType
     newCargo.origin = system.name
     newCargo.originHexX = system.hexNumX
     newCargo.originHexY = system.hexNumY
-    newCargo.destination = 
+    newCargo.destination = listHexGrid[destination[0]][destination[1]].name
+    newCargo.destinationHexX = destination[0]
+    newCargo.destinationHexY = destination[1]
+    newCargo.tonnage = cargoSize
+    newCargo.worth = parsecShipmentRate[range]
     return newCargo
 
 def performNewDay(gameTime,listSystems,listHexGrid):
     for system in listSystems:
-        system.cargoForPickup.append(generateCargo(gameTime,system,listHexGrid,"Major Cargo", random.randint(1,6) * 10, -4))
-        system.cargoForPickup.append(generateCargo(gameTime,system,listHexGrid,"Minor Cargo", random.randint(1,6) * 5, 0))
-        system.cargoForPickup.append(generateCargo(gameTime,system,listHexGrid,"Incidental Cargo", random.randint(1,6), 2))
+        newMajorCargo = generateCargo(gameTime,system,listHexGrid,"Major Cargo", random.randint(1,6) * 10, -4)
+        if (newMajorCargo is not None):
+            system.cargoForPickup.append(newMajorCargo)
+        newMinorCargo = generateCargo(gameTime,system,listHexGrid,"Minor Cargo", random.randint(1,6) * 5, 0)
+        if (newMinorCargo is not None):
+            system.cargoForPickup.append(newMinorCargo)
+        newIncidentalCargo = generateCargo(gameTime,system,listHexGrid,"Incidental Cargo", random.randint(1,6), 2)
+        if (newIncidentalCargo is not None):
+            system.cargoForPickup.append(newIncidentalCargo)
 
 
 ###########################
@@ -479,15 +505,16 @@ def main():
         #    player_pos.x += 300 * dt
 
         #listShipsFlying =
-        if (gameDay != (gameTime // gameDay) + 1):
-            gameDay = (gameTime // gameDay) + 1
+        if (gameDay < (gameTime // gameDay) + 1):
+            print(gameDay)
+            gameDay = gameDay + 1
             performNewDay(gameTime, listSystems, listHexGrid)
 
         moveShips(listShipsFlying)
         drawUI(listHexes)
         drawUI(listSystems)
         drawUI(listShipsFlying)
-        drawSideUI(gameTime)
+        drawSideUI(gameTime,listSystems)
 
         # drawUI(listLines)
         # flip() the display to put your work on screen
