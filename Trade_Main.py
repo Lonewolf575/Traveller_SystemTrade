@@ -95,9 +95,10 @@ class Ship(UIObject):
     jumpRange = 0
 
     tonnage = 0
+    usedTonnage = 0
     currentMoney = 0
     currentCargo = []
-
+    jumpRoute = []
 
     def __init__(self, posX, posY, size = 3, name = "ship", color = "blue", shape = Shape.CIRCLE):
         self.posX = posX
@@ -109,12 +110,13 @@ class Ship(UIObject):
         self.color = color
         self.shape = shape
         self.currentCargo = []
+        self.jumpRoute = []
 
 class System(UIObject):
     hexNumX = 0
     hexNumY= 0
     shipsInSystem = []
-    cargoForPickup = []
+    cargoForPickup = {}
     def __init__(self, posX, posY, size = 10, name = "system", color = "grey", shape = Shape.CIRCLE):
         self.posX = posX
         self.posY = posY
@@ -123,6 +125,7 @@ class System(UIObject):
         self.color = color
         self.shape = shape
         self.shipsInSystem = []
+        self.cargoForPickup = []
 
 class Hex(UIObject):
     shape = Shape.HEX
@@ -159,9 +162,9 @@ global major_radius; major_radius = hexSize / math.cos(math.radians(30))
 global hexOffsetX; hexOffsetX = major_radius
 global hexOffsetY; hexOffsetY = hexSize
 global hexGridX; hexGridX = 12
-global hexGridY; hexGridY = 8
+global hexGridY; hexGridY = 15
 
-global numberOfSystems; numberOfSystems = 50
+global numberOfSystems; numberOfSystems = 60
 
 #######################
 ##-Global roll chart-##
@@ -329,9 +332,8 @@ def drawSideUI(time,listSystems):
     screen.blit(dateText,(xOffset,0))
     system = listSystems[0]
     textToPrint = f"System:{system.name}, Position:[{system.hexNumX},{system.hexNumY}]"
-    textToPrint = textToPrint + f"/r/nCargoCount:{len(system.cargoForPickup)}"
-    #for cargo in system.cargoForPickup:
-    #    textToPrint = textToPrint + f"\r\nCargoName:{cargo.cargoName}, Worth:{cargo.worth}, Tonnage:{cargo.tonnage}"
+    for cargo in system.cargoForPickup:
+        textToPrint = textToPrint + f"\r\nCargoName:{cargo.cargoName}, Worth:{cargo.worth}, Tonnage:{cargo.tonnage}"
 
     systemText = gameFontSideUI.render(textToPrint, False, "white")
     screen.blit(systemText,(xOffset,20))
@@ -445,20 +447,78 @@ def generateCargo(gameTime,system,listHexGrid,cargoType,cargoSize,cargoSizeMod):
     newCargo.destinationHexX = destination[0]
     newCargo.destinationHexY = destination[1]
     newCargo.tonnage = cargoSize
-    newCargo.worth = parsecShipmentRate[range]
+    newCargo.worth = parsecShipmentRate[range] * cargoSize
     return newCargo
 
-def performNewDay(gameTime,listSystems,listHexGrid):
+def checkMinJumpRequirements(source,destination,hexGrid):
+    rangeJumps = {6:[[],0],5:[[],0],4:[[],0],3:[[],0],2:[[],0],1:[[],0]}
+    for i in range(6):
+        rangeJumps[i + 1][0] = navigatePath(source,destination,hexGrid,i + 1)
+    return rangeJumps
+
+def performNewDay(gameTime,listSystems,listHexGrid,listShipsInTransit):
+
+    # Check Arriving Ships
+
     for system in listSystems:
+    # Generate Cargo Today
+        listOfCargoToAdd = []
         newMajorCargo = generateCargo(gameTime,system,listHexGrid,"Major Cargo", random.randint(1,6) * 10, -4)
         if (newMajorCargo is not None):
-            system.cargoForPickup.append(newMajorCargo)
+            listOfCargoToAdd.append(newMajorCargo)
         newMinorCargo = generateCargo(gameTime,system,listHexGrid,"Minor Cargo", random.randint(1,6) * 5, 0)
         if (newMinorCargo is not None):
-            system.cargoForPickup.append(newMinorCargo)
+            listOfCargoToAdd.append(newMinorCargo)
         newIncidentalCargo = generateCargo(gameTime,system,listHexGrid,"Incidental Cargo", random.randint(1,6), 2)
         if (newIncidentalCargo is not None):
-            system.cargoForPickup.append(newIncidentalCargo)
+            listOfCargoToAdd.append(newIncidentalCargo)
+
+        cargoPerDestination = {}
+        for cargo in listOfCargoToAdd:
+            if f"{cargo.destinationHexX} {cargo.destinationHexY}" not in cargoPerDestination.keys():
+                ranges = checkMinJumpRequirements([system.hexNumX,system.hexNumY],[cargo.destinationHexX,cargo.destinationHexY],listHexGrid)
+                cargoPerDestination[f"{cargo.destinationHexX} {cargo.destinationHexY}"] = [[cargo.destinationHexX,cargo.destinationHexY],ranges,0,[]]
+
+            cargoPerDestination[f"{cargo.destinationHexX} {cargo.destinationHexY}"][2] = cargoPerDestination[f"{cargo.destinationHexX} {cargo.destinationHexY}"][2] + cargo.worth
+            cargoPerDestination[f"{cargo.destinationHexX} {cargo.destinationHexY}"][3].append(cargo)
+
+        for key in cargoPerDestination.keys():
+            for range in cargoPerDestination[key][1].key():
+                if (cargoPerDestination[key][1][range][0] != False):
+                    cargoPerDestination[key][1][range][1] = cargoPerDestination[key][2] / len(cargoPerDestination[key][1][range][0])
+
+        system.cargoForPickup = cargoPerDestination
+
+        for ship in system.shipsInSystem:
+    # Unload cargo on ships
+            cargoToUnload = []
+            for cargo in ship.currentCargo:
+                if [cargo.destinationHexX,cargo.destinationHexY] == [system.hexNumX,system.hexNumY]:
+                    cargoToUnload.append(cargo)
+            for cargo in cargoToUnload:
+                ship.currentCargo.remove(cargo)
+                ship.currentMoney = ship.currentMoney + cargo.worth
+    #Load cargo on ships
+            bestPay = ["",0]
+            for key in system.cargoForPickup.keys():
+                if (system.cargoForPickup[key][1][ship.jumpRange][0] != False):
+                    if bestPay[1] < system.cargoForPickup[key][1][ship.jumpRange][1]:
+                        bestPay[0] = key
+
+            listOfLoadedCargo = []
+            for pieceOfCargo in system.cargoForPickup[bestPay[0]][3]:
+                if ship.usedTonnage + pieceOfCargo.tonnage <= ship.tonnage:
+                    listOfLoadedCargo.append(pieceOfCargo)
+
+    #Choose destination.
+            ship.jumpRoute = listOfLoadedCargo[0].
+
+            for pieceOfCargo in listOfLoadedCargo:
+                ship.currentCargo.append(pieceOfCargo)
+                system.cargoForPickup[bestPay[0]][3].remove(pieceOfCargo)
+
+    # Launch ships Today
+
 
 
 ###########################
