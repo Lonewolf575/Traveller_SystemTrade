@@ -91,6 +91,7 @@ class Ship(UIObject):
     destinationPosX = 0
     destinationPosY = 0
     startTime = 0
+    percentTravelTime = 0
 
     jumpRange = 0
 
@@ -125,7 +126,7 @@ class System(UIObject):
         self.color = color
         self.shape = shape
         self.shipsInSystem = []
-        self.cargoForPickup = []
+        self.cargoForPickup = {}
 
 class Hex(UIObject):
     shape = Shape.HEX
@@ -287,16 +288,11 @@ def genShips(listSystems):
     ##    shipGenCountdown = waitBetweenShipGen
 
 def moveShips(listShips):
-    shipsToRemove = []
     for ship in listShips:
         percentToSystem = (gameTime - ship.startTime) / (gameDay * systemTravelTime)
+        ship.percentTravelTime = percentToSystem
         ship.posX = ship.startPosX + ((ship.endPosX - ship.startPosX) * percentToSystem)
         ship.posY = ship.startPosY + ((ship.endPosY - ship.startPosY) * percentToSystem)
-        if (percentToSystem >= 1):
-            print(ship.name + " arrived at its destination")
-            shipsToRemove.append(ship)
-    for ship in shipsToRemove:
-        listShips.remove(ship)
 
 def get_date_from_day_number(year, day_number):
     # Start from January 1st of the given year
@@ -332,8 +328,8 @@ def drawSideUI(time,listSystems):
     screen.blit(dateText,(xOffset,0))
     system = listSystems[0]
     textToPrint = f"System:{system.name}, Position:[{system.hexNumX},{system.hexNumY}]"
-    for cargo in system.cargoForPickup:
-        textToPrint = textToPrint + f"\r\nCargoName:{cargo.cargoName}, Worth:{cargo.worth}, Tonnage:{cargo.tonnage}"
+    #for cargo in system.cargoForPickup.values():
+    #    textToPrint = textToPrint + f"\r\nCargoName:{cargo.cargoName}, Worth:{cargo.worth}, Tonnage:{cargo.tonnage}" #TODO FIX
 
     systemText = gameFontSideUI.render(textToPrint, False, "white")
     screen.blit(systemText,(xOffset,20))
@@ -461,6 +457,17 @@ def performNewDay(gameTime,listSystems,listHexGrid,listShipsInTransit):
     # Check Arriving Ships
 
     for system in listSystems:
+        shipsToEnterSystem = []
+        for ship in listShipsInTransit:
+            if ship.jumpRoute[0] == [system.hexNumX,system.hexNumY]:
+                if ship.percentToSystem >= 1:
+                    print(f"{ship.name} arrived at {system.name}")
+                    shipsToEnterSystem.append(ship)
+                    system.shipsInSystem.append(ship)
+                    ship.percentToSystem = 0
+        for ship in shipsToEnterSystem:
+            listShipsInTransit.remove(ship)
+
     # Generate Cargo Today
         listOfCargoToAdd = []
         newMajorCargo = generateCargo(gameTime,system,listHexGrid,"Major Cargo", random.randint(1,6) * 10, -4)
@@ -473,7 +480,7 @@ def performNewDay(gameTime,listSystems,listHexGrid,listShipsInTransit):
         if (newIncidentalCargo is not None):
             listOfCargoToAdd.append(newIncidentalCargo)
 
-        cargoPerDestination = {}
+        cargoPerDestination = system.cargoForPickup
         for cargo in listOfCargoToAdd:
             if f"{cargo.destinationHexX} {cargo.destinationHexY}" not in cargoPerDestination.keys():
                 ranges = checkMinJumpRequirements([system.hexNumX,system.hexNumY],[cargo.destinationHexX,cargo.destinationHexY],listHexGrid)
@@ -483,42 +490,68 @@ def performNewDay(gameTime,listSystems,listHexGrid,listShipsInTransit):
             cargoPerDestination[f"{cargo.destinationHexX} {cargo.destinationHexY}"][3].append(cargo)
 
         for key in cargoPerDestination.keys():
-            for range in cargoPerDestination[key][1].key():
+            for range in cargoPerDestination[key][1].keys():
                 if (cargoPerDestination[key][1][range][0] != False):
                     cargoPerDestination[key][1][range][1] = cargoPerDestination[key][2] / len(cargoPerDestination[key][1][range][0])
 
         system.cargoForPickup = cargoPerDestination
-
+        shipsToLaunch = []
+        print(f"System num: {system.name}")
         for ship in system.shipsInSystem:
     # Unload cargo on ships
-            cargoToUnload = []
-            for cargo in ship.currentCargo:
-                if [cargo.destinationHexX,cargo.destinationHexY] == [system.hexNumX,system.hexNumY]:
-                    cargoToUnload.append(cargo)
-            for cargo in cargoToUnload:
-                ship.currentCargo.remove(cargo)
-                ship.currentMoney = ship.currentMoney + cargo.worth
-    #Load cargo on ships
-            bestPay = ["",0]
-            for key in system.cargoForPickup.keys():
-                if (system.cargoForPickup[key][1][ship.jumpRange][0] != False):
-                    if bestPay[1] < system.cargoForPickup[key][1][ship.jumpRange][1]:
-                        bestPay[0] = key
+            if (len(ship.jumpRoute) == 1):
 
+                ship.jumpRoute.clear()
+
+                cargoToUnload = []
+                for cargo in ship.currentCargo:
+                    if [cargo.destinationHexX,cargo.destinationHexY] == [system.hexNumX,system.hexNumY]:
+                        cargoToUnload.append(cargo)
+                for cargo in cargoToUnload:
+                    ship.currentCargo.remove(cargo)
+                    ship.currentMoney = ship.currentMoney + cargo.worth
+    #Load cargo on ships
             listOfLoadedCargo = []
-            for pieceOfCargo in system.cargoForPickup[bestPay[0]][3]:
-                if ship.usedTonnage + pieceOfCargo.tonnage <= ship.tonnage:
-                    listOfLoadedCargo.append(pieceOfCargo)
+            if (len(ship.jumpRoute) > 0):
+                for key in system.cargoForPickup.keys():
+                    if([f"{ship.jumpRoute[-1][0]} {ship.jumpRoute[-1][1]}"] == key):
+                        for pieceOfCargo in system.cargoForPickup[key][3]:
+                            if ship.usedTonnage + pieceOfCargo.tonnage <= ship.tonnage:
+                                listOfLoadedCargo.append(pieceOfCargo)
+            else:
+                bestPay = ["",0]
+                for key in system.cargoForPickup.keys():
+                    if (system.cargoForPickup[key][1][ship.jumpRange][0] != False):
+                        if bestPay[1] < system.cargoForPickup[key][1][ship.jumpRange][1]:
+                            bestPay[0] = key
+
+                if (bestPay[0] != ""):
+                    for pieceOfCargo in system.cargoForPickup[bestPay[0]][3]:
+                        if ship.usedTonnage + pieceOfCargo.tonnage <= ship.tonnage:
+                            listOfLoadedCargo.append(pieceOfCargo)
 
     #Choose destination.
-            ship.jumpRoute = listOfLoadedCargo[0].
+            if (len(ship.jumpRoute) == 0):
+                if (len(listOfLoadedCargo) > 0):
+                    ship.jumpRoute = navigatePath([system.hexNumX,system.hexNumY],[listOfLoadedCargo[0].destinationHexX,listOfLoadedCargo[0].destinationHexY],listHexGrid,ship.jumpRange)
 
             for pieceOfCargo in listOfLoadedCargo:
                 ship.currentCargo.append(pieceOfCargo)
                 system.cargoForPickup[bestPay[0]][3].remove(pieceOfCargo)
 
-    # Launch ships Today
+            if len(ship.currentCargo) > 0:
+                shipsToLaunch.append(ship)
 
+    # Launch ships Today
+    for ship in shipsToLaunch:
+        listShipsInTransit.append(ship)
+        ship.startPosX = ship.jumpRoute[0][0]
+        ship.startPoxY = ship.jumpRoute[0][1]
+        ship.jumpRoute.pop(0)
+        ship.destinationPosX = ship.jumpRoute[0][0]
+        ship.destinationPosY = ship.jumpRoute[0][1]
+
+        system.shipsInSystem.remove(ship)
 
 
 ###########################
@@ -568,7 +601,7 @@ def main():
         if (gameDay < (gameTime // gameDay) + 1):
             print(gameDay)
             gameDay = gameDay + 1
-            performNewDay(gameTime, listSystems, listHexGrid)
+            performNewDay(gameTime, listSystems, listHexGrid, listShipsFlying)
 
         moveShips(listShipsFlying)
         drawUI(listHexes)
