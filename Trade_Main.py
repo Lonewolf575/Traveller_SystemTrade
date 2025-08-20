@@ -191,6 +191,9 @@ global tradeChart; tradeChart = {
 def roll2d6():
     return random.randint(1,6) + random.randint(1,6)
 
+def getScreenPos(hexPos,hexGrid):
+    return hexGrid[hexPos[0]][hexPos[1]].hexCenterX, hexGrid[hexPos[0]][hexPos[1]].hexCenterY
+
 def genHexes():
     hexes = []
 
@@ -265,7 +268,6 @@ def genShips(listSystems):
         shipCreation.tonnage = random.randrange(10,4000,5)
         shipCreation.jumpRange = shipJumpRangeChart[random.randrange(len(shipJumpRangeChart))]
         listSystems[systemIndex].shipsInSystem.append(shipCreation)
-        print(f"Ship: {shipCreation.name} created at {listSystems[systemIndex].name}. Cargo: {shipCreation.tonnage}, Money: {str(shipCreation.currentMoney)}, Jump: {shipCreation.jumpRange}")
 
     ##global shipGenCountdown
     ##shipGenCountdown = shipGenCountdown - dt
@@ -287,12 +289,16 @@ def genShips(listSystems):
     ##        print(shipCreation.name + " created. From: " + listSystems[startSystemIndex].name + " To: " + listSystems[endSystemIndex].name)
     ##    shipGenCountdown = waitBetweenShipGen
 
-def moveShips(listShips):
+def moveShips(listShips,listHexGrid):
     for ship in listShips:
         percentToSystem = (gameTime - ship.startTime) / (gameDay * systemTravelTime)
         ship.percentTravelTime = percentToSystem
-        ship.posX = ship.startPosX + ((ship.endPosX - ship.startPosX) * percentToSystem)
-        ship.posY = ship.startPosY + ((ship.endPosY - ship.startPosY) * percentToSystem)
+
+        startPosX, startPosY = getScreenPos([ship.startPosX,ship.startPosY],listHexGrid)
+        destPosX, destPoxY = getScreenPos([ship.destinationPosX,ship.destinationPosY],listHexGrid)
+
+        ship.posX = startPosX + ((destPosX - startPosX) * percentToSystem)
+        ship.posY = startPosY + ((destPoxY - startPosY) * percentToSystem)
 
 def get_date_from_day_number(year, day_number):
     # Start from January 1st of the given year
@@ -301,7 +307,7 @@ def get_date_from_day_number(year, day_number):
     target_date = start_date + timedelta(days=day_number - 1)
     return target_date.strftime("%B %d") + f", {year}"  # Returns format like "August 08"
 
-def drawUI(UIElements):
+def drawUI(UIElements, listHexGrid):
     for UIElement in UIElements:
         pos = pygame.Vector2(UIElement.posX,UIElement.posY)
         if UIElement.shape == Shape.CIRCLE:
@@ -317,7 +323,8 @@ def drawUI(UIElements):
             screen.blit(text,(UIElement.posX,UIElement.posY + 20))
 
         if isinstance(UIElement,Ship):
-            startPos = pygame.Vector2(UIElement.startPosX, UIElement.startPosY)
+            startPosX, startPosY = getScreenPos([UIElement.startPosX, UIElement.startPosY],listHexGrid)
+            startPos = pygame.Vector2(startPosX, startPosY)
             endPos = pygame.Vector2(UIElement.posX,UIElement.posY)
             pygame.draw.line(screen, "blue", startPos, endPos)
 
@@ -337,10 +344,7 @@ def drawSideUI(time,listSystems):
 def convertToGrid(listHexes):
     hexGrid = [[False for _ in range(hexGridY)] for _ in range(hexGridX)]
     for hex in listHexes:
-        if hex.systemAssigned == True:
-            hexGrid[hex.hexNumX][hex.hexNumY] = hex.system
-        else:
-            hexGrid[hex.hexNumX][hex.hexNumY] = None
+        hexGrid[hex.hexNumX][hex.hexNumY] = hex
     return hexGrid
 
 def minDistance(point1,point2):
@@ -363,7 +367,7 @@ def getNeighbors(hexGrid,start, jumpRange):
                     if (possibleNeighbor[1] >= 0) and (possibleNeighbor[1] < hexGridY):
                         if ((possibleNeighbor not in neighbors) and (possibleNeighbor not in nextRing)):
                             nextRing.append(possibleNeighbor)
-                        if hexGrid[possibleNeighbor[0]][possibleNeighbor[1]] != None:
+                        if hexGrid[possibleNeighbor[0]][possibleNeighbor[1]].systemAssigned == True:
                             if ((possibleNeighbor not in neighbors)):
                                 neighbors.insert(0,possibleNeighbor)
         currentRing = nextRing.copy()
@@ -460,11 +464,11 @@ def performNewDay(gameTime,listSystems,listHexGrid,listShipsInTransit):
         shipsToEnterSystem = []
         for ship in listShipsInTransit:
             if ship.jumpRoute[0] == [system.hexNumX,system.hexNumY]:
-                if ship.percentToSystem >= 1:
+                if ship.percentTravelTime >= 1:
                     print(f"{ship.name} arrived at {system.name}")
                     shipsToEnterSystem.append(ship)
                     system.shipsInSystem.append(ship)
-                    ship.percentToSystem = 0
+                    ship.percentTravelTime = 0
         for ship in shipsToEnterSystem:
             listShipsInTransit.remove(ship)
 
@@ -496,7 +500,6 @@ def performNewDay(gameTime,listSystems,listHexGrid,listShipsInTransit):
 
         system.cargoForPickup = cargoPerDestination
         shipsToLaunch = []
-        print(f"System num: {system.name}")
         for ship in system.shipsInSystem:
     # Unload cargo on ships
             if (len(ship.jumpRoute) == 1):
@@ -542,16 +545,16 @@ def performNewDay(gameTime,listSystems,listHexGrid,listShipsInTransit):
             if len(ship.currentCargo) > 0:
                 shipsToLaunch.append(ship)
 
-    # Launch ships Today
-    for ship in shipsToLaunch:
-        listShipsInTransit.append(ship)
-        ship.startPosX = ship.jumpRoute[0][0]
-        ship.startPoxY = ship.jumpRoute[0][1]
-        ship.jumpRoute.pop(0)
-        ship.destinationPosX = ship.jumpRoute[0][0]
-        ship.destinationPosY = ship.jumpRoute[0][1]
-
-        system.shipsInSystem.remove(ship)
+        # Launch ships Today
+        for ship in shipsToLaunch:
+            listShipsInTransit.append(ship)
+            ship.startTime = gameTime
+            ship.startPosX = ship.jumpRoute[0][0]
+            ship.startPosY = ship.jumpRoute[0][1]
+            ship.jumpRoute.pop(0)
+            ship.destinationPosX = ship.jumpRoute[0][0]
+            ship.destinationPosY = ship.jumpRoute[0][1]
+            system.shipsInSystem.remove(ship)
 
 
 ###########################
@@ -603,10 +606,10 @@ def main():
             gameDay = gameDay + 1
             performNewDay(gameTime, listSystems, listHexGrid, listShipsFlying)
 
-        moveShips(listShipsFlying)
-        drawUI(listHexes)
-        drawUI(listSystems)
-        drawUI(listShipsFlying)
+        moveShips(listShipsFlying,listHexGrid)
+        drawUI(listHexes,listHexGrid)
+        drawUI(listSystems,listHexGrid)
+        drawUI(listShipsFlying,listHexGrid)
         drawSideUI(gameTime,listSystems)
 
         # drawUI(listLines)
